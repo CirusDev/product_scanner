@@ -5,16 +5,10 @@ import android.content.Context
 import android.net.Uri
 import android.os.Bundle
 import android.util.Log
-import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.camera.core.CameraSelector
-import androidx.camera.core.ImageAnalysis
-import androidx.camera.core.ImageCapture
-import androidx.camera.core.ImageCaptureException
-import androidx.camera.core.ImageProxy
-import androidx.camera.core.Preview
+import androidx.camera.core.*
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.layout.*
@@ -22,6 +16,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -35,7 +32,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.core.content.ContextCompat
 import coil.compose.AsyncImage
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.isGranted
@@ -46,12 +42,14 @@ import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.common.InputImage
 import fr.code.productlist.ui.theme.ProductListTheme
 import java.io.File
+import java.util.Locale
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
 data class Product(
     val barcode: String,
-    val quantity: Int,
+    var quantity: Int,
+    val price: Double,
     val imagePath: String? = null
 )
 
@@ -83,12 +81,14 @@ fun MainScreen(cameraExecutor: ExecutorService) {
     val products = remember { mutableStateListOf<Product>() }
     
     var scannedBarcode by remember { mutableStateOf("") }
-    var quantity by remember { mutableStateOf("") }
+    var quantityInput by remember { mutableStateOf("") }
+    var priceInput by remember { mutableStateOf("") }
     var photoUri by remember { mutableStateOf<Uri?>(null) }
     var isScanning by remember { mutableStateOf(true) }
-    var existingProduct by remember { mutableStateOf<Product?>(null) }
 
+    // Chargement au démarrage
     LaunchedEffect(Unit) {
+        products.clear()
         products.addAll(loadProductsLocally(context))
     }
 
@@ -103,12 +103,12 @@ fun MainScreen(cameraExecutor: ExecutorService) {
         Column(modifier = Modifier.padding(innerPadding).fillMaxSize()) {
             if (cameraPermissionState.status.isGranted) {
                 if (isScanning) {
-                    Box(modifier = Modifier.weight(0.5f).fillMaxWidth()) {
+                    // MODE SCANNER
+                    Box(modifier = Modifier.weight(0.7f).fillMaxWidth()) {
                         CameraScannerView(
                             executor = cameraExecutor,
                             onBarcodeScanned = { barcode ->
                                 scannedBarcode = barcode
-                                existingProduct = products.find { it.barcode == barcode }
                                 isScanning = false
                             }
                         )
@@ -116,48 +116,42 @@ fun MainScreen(cameraExecutor: ExecutorService) {
                             color = Color.Black.copy(alpha = 0.5f),
                             modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth()
                         ) {
-                            Text(
-                                "Visez un code-barres",
-                                modifier = Modifier.padding(16.dp),
-                                color = Color.White,
-                                style = MaterialTheme.typography.bodyLarge
-                            )
+                            Text("Visez un code-barres", modifier = Modifier.padding(16.dp), color = Color.White)
                         }
                     }
                 } else {
-                    Box(modifier = Modifier.weight(0.5f).fillMaxWidth()) {
-                        if (existingProduct != null) {
+                    // MODE EDITION / CREATION
+                    Box(modifier = Modifier.weight(0.7f).fillMaxWidth()) {
+                        val productToShow = products.find { it.barcode == scannedBarcode }
+                        if (productToShow != null) {
                             ProductLookupView(
-                                product = existingProduct!!,
-                                onBack = {
-                                    isScanning = true
-                                    scannedBarcode = ""
-                                    existingProduct = null
-                                }
+                                product = productToShow,
+                                onUpdateQuantity = { newQty ->
+                                    val index = products.indexOfFirst { it.barcode == scannedBarcode }
+                                    if (index != -1) {
+                                        products[index] = products[index].copy(quantity = newQty)
+                                        saveProductsLocally(context, products)
+                                    }
+                                },
+                                onBack = { isScanning = true; scannedBarcode = "" }
                             )
                         } else {
                             ProductRegistrationView(
                                 barcode = scannedBarcode,
-                                quantity = quantity,
+                                quantity = quantityInput,
+                                price = priceInput,
                                 photoUri = photoUri,
-                                onQuantityChange = { quantity = it },
+                                onQuantityChange = { quantityInput = it },
+                                onPriceChange = { priceInput = it },
                                 onPhotoCaptured = { uri -> photoUri = uri },
                                 onSave = {
-                                    val q = quantity.toIntOrNull() ?: 0
-                                    val newProduct = Product(scannedBarcode, q, photoUri?.toString())
-                                    products.add(newProduct)
+                                    val q = quantityInput.toIntOrNull() ?: 0
+                                    val p = priceInput.toDoubleOrNull() ?: 0.0
+                                    products.add(Product(scannedBarcode, q, p, photoUri?.toString()))
                                     saveProductsLocally(context, products)
-                                    scannedBarcode = ""
-                                    quantity = ""
-                                    photoUri = null
-                                    isScanning = true
+                                    scannedBarcode = ""; quantityInput = ""; priceInput = ""; photoUri = null; isScanning = true
                                 },
-                                onCancel = {
-                                    isScanning = true
-                                    scannedBarcode = ""
-                                    quantity = ""
-                                    photoUri = null
-                                },
+                                onCancel = { scannedBarcode = ""; quantityInput = ""; priceInput = ""; photoUri = null; isScanning = true },
                                 cameraExecutor = cameraExecutor
                             )
                         }
@@ -165,16 +159,44 @@ fun MainScreen(cameraExecutor: ExecutorService) {
                 }
             } else {
                 Box(modifier = Modifier.weight(0.5f).fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Button(onClick = { cameraPermissionState.launchPermissionRequest() }) {
-                        Text("Activer la Caméra")
-                    }
+                    Button(onClick = { cameraPermissionState.launchPermissionRequest() }) { Text("Activer la Caméra") }
                 }
             }
 
-            Text("Historique", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(16.dp))
-            LazyColumn(modifier = Modifier.weight(0.5f)) {
-                items(products.reversed()) { product ->
-                    ProductItem(product)
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    "Historique",
+                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.titleMedium
+                )
+//                val totalValue = products.sumOf { it.price * it.quantity }
+//                Text(
+//                    "Valeur: ${String.format(Locale.US, "%.2f", totalValue)} €",
+//                    fontWeight = FontWeight.Bold,
+//                    style = MaterialTheme.typography.titleMedium,
+//                    color = MaterialTheme.colorScheme.primary
+//                )
+            }
+            LazyColumn(modifier = Modifier.weight(0.3f)) {
+                items(products.asReversed()) { product ->
+                    ProductItem(
+                        product = product,
+                        onUpdateQuantity = { newQty ->
+                            val index = products.indexOfFirst { it.barcode == product.barcode }
+                            if (index != -1) {
+                                products[index] = products[index].copy(quantity = newQty)
+                                saveProductsLocally(context, products)
+                            }
+                        },
+                        onDelete = {
+                            products.removeIf { it.barcode == product.barcode }
+                            saveProductsLocally(context, products)
+                        }
+                    )
                 }
             }
         }
@@ -182,103 +204,173 @@ fun MainScreen(cameraExecutor: ExecutorService) {
 }
 
 @Composable
-fun ProductItem(product: Product) {
+fun ProductItem(product: Product, onUpdateQuantity: (Int) -> Unit, onDelete: () -> Unit) {
     Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
         Row(modifier = Modifier.padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
             AsyncImage(
                 model = product.imagePath,
                 contentDescription = null,
-                modifier = Modifier.size(60.dp).clip(RoundedCornerShape(8.dp)),
+                modifier = Modifier.size(50.dp).clip(RoundedCornerShape(8.dp)),
                 contentScale = ContentScale.Crop
             )
-            Spacer(modifier = Modifier.width(16.dp))
-            Column {
-                Text(product.barcode, fontWeight = FontWeight.Bold)
-                Text("Quantité: ${product.quantity}")
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(product.barcode, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
+                Text(
+                    "Stock: ${product.quantity}",
+                    style = MaterialTheme.typography.bodySmall
+                )
+                Text(
+                    "Prix: ${String.format(Locale.US, "%.2f", product.price)} €",
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = { if (product.quantity > 0) onUpdateQuantity(product.quantity - 1) }) {
+                    Text(
+                        "-",
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White,
+                        style = MaterialTheme.typography.titleLarge
+                    )
+                }
+                Text("${product.quantity}", fontWeight = FontWeight.Bold)
+                IconButton(onClick = { onUpdateQuantity(product.quantity + 1) }) {
+                    Icon(
+                        Icons.Default.Add,
+                        contentDescription = null,
+                        modifier = Modifier.size(20.dp),
+                        tint = Color.Green
+                    )
+                }
+                IconButton(onClick = onDelete) {
+                    Icon(
+                        Icons.Default.Delete,
+                        contentDescription = "Supprimer",
+                        modifier = Modifier.size(20.dp),
+                        tint = Color.Red
+                    )
+                }
             }
         }
     }
 }
 
 @Composable
-fun ProductLookupView(product: Product, onBack: () -> Unit) {
+fun ProductLookupView(product: Product, onUpdateQuantity: (Int) -> Unit, onBack: () -> Unit) {
+    var editValue by remember(product.barcode) { mutableStateOf(product.quantity.toString()) }
+
     Column(modifier = Modifier.fillMaxSize().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        Text("PRODUIT EN STOCK", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+        Text("EN STOCK", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+        AsyncImage(model = product.imagePath, contentDescription = null, modifier = Modifier.size(140.dp).clip(RoundedCornerShape(12.dp)), contentScale = ContentScale.Crop)
         Spacer(modifier = Modifier.height(8.dp))
-        AsyncImage(
-            model = product.imagePath,
-            contentDescription = null,
-            modifier = Modifier.size(180.dp).clip(RoundedCornerShape(12.dp)),
-            contentScale = ContentScale.Crop
+        Text(product.barcode, style = MaterialTheme.typography.bodyLarge)
+        Text(
+            "Prix: ${String.format(Locale.US, "%.2f", product.price)} €",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold
         )
-        Spacer(modifier = Modifier.height(16.dp))
-        Text("Code: ${product.barcode}", style = MaterialTheme.typography.bodyMedium)
-        Text("${product.quantity}", style = MaterialTheme.typography.displayMedium, fontWeight = FontWeight.Bold)
-        Text("UNITÉS", style = MaterialTheme.typography.labelMedium)
-        Spacer(modifier = Modifier.weight(1f))
-        Button(onClick = onBack, modifier = Modifier.fillMaxWidth()) {
-            Text("SCANNER SUIVANT")
+        
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(vertical = 8.dp)) {
+                IconButton(onClick = {
+                    val newQty = (product.quantity - 1).coerceAtLeast(0)
+                    editValue = newQty.toString()
+                    onUpdateQuantity(newQty)
+                }) { Text("-", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.headlineMedium) }
+
+                OutlinedTextField(
+                    value = editValue,
+                    onValueChange = {
+                        editValue = it
+                        it.toIntOrNull()?.let { newQty -> onUpdateQuantity(newQty) }
+                    },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.width(100.dp),
+                    textStyle = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold)
+                )
+
+                IconButton(onClick = {
+                    val newQty = product.quantity + 1
+                    editValue = newQty.toString()
+                    onUpdateQuantity(newQty)
+                }) { Icon(Icons.Default.Add, "Plus") }
         }
+        
+        Spacer(modifier = Modifier.weight(1f))
+        Button(onClick = onBack, modifier = Modifier.fillMaxWidth()) { Text("SCANNER SUIVANT") }
     }
 }
 
 @Composable
-fun ProductRegistrationView(
-    barcode: String,
-    quantity: String,
-    photoUri: Uri?,
-    onQuantityChange: (String) -> Unit,
-    onPhotoCaptured: (Uri) -> Unit,
-    onSave: () -> Unit,
-    onCancel: () -> Unit,
-    cameraExecutor: ExecutorService
-) {
-    var showCameraForPhoto by remember { mutableStateOf(false) }
-
-    if (showCameraForPhoto) {
+fun ProductRegistrationView(barcode: String, quantity: String, price: String, photoUri: Uri?, onQuantityChange: (String) -> Unit, onPriceChange: (String) -> Unit, onPhotoCaptured: (Uri) -> Unit, onSave: () -> Unit, onCancel: () -> Unit, cameraExecutor: ExecutorService) {
+    var showCamera by remember { mutableStateOf(false) }
+    if (showCamera) {
         CameraCaptureView(
             executor = cameraExecutor,
-            onPhotoCaptured = { uri ->
-                onPhotoCaptured(uri)
-                showCameraForPhoto = false
-            }
+            onPhotoCaptured = { onPhotoCaptured(it); showCamera = false }
         )
     } else {
-        Column(modifier = Modifier.fillMaxSize().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Text("NOUVEAU PRODUIT", style = MaterialTheme.typography.labelLarge)
-            Text(barcode, fontWeight = FontWeight.Bold)
-            Spacer(modifier = Modifier.height(16.dp))
-            if (photoUri != null) {
-                AsyncImage(
-                    model = photoUri,
-                    contentDescription = null,
-                    modifier = Modifier.size(150.dp).clip(RoundedCornerShape(12.dp)),
-                    contentScale = ContentScale.Crop
-                )
-                TextButton(onClick = { showCameraForPhoto = true }) { Text("Changer la photo") }
-            } else {
-                Button(
-                    onClick = { showCameraForPhoto = true },
-                    modifier = Modifier.size(150.dp),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Text("Prendre Photo", style = MaterialTheme.typography.bodySmall)
-                }
+        Column(
+            modifier = Modifier.fillMaxSize().padding(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("NOUVEAU PRODUIT", fontWeight = FontWeight.Bold)
+                Text(barcode)
+                Spacer(modifier = Modifier.height(16.dp))
+                Box(modifier = Modifier.size(170.dp).clip(RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) {
+                    if (photoUri != null) {
+                        AsyncImage(
+                            model = photoUri,
+                            contentDescription = null,
+                            modifier = Modifier.fillMaxSize(), 
+                            contentScale = ContentScale.Crop
+                        )
+                        Button(
+                            onClick = { showCamera = true },
+                            modifier = Modifier.align(Alignment.BottomCenter).padding(4.dp)) {
+                                Text(
+                                    "Changer",
+                                    style = MaterialTheme.typography.labelSmall
+                                )}
+                    } else {
+                        Button(
+                            onClick = { showCamera = true },
+                            modifier = Modifier.fillMaxSize()) {
+                                Text("Prendre Photo")
+                            }
+                    }
             }
             Spacer(modifier = Modifier.height(16.dp))
-            OutlinedTextField(
-                value = quantity,
-                onValueChange = onQuantityChange,
-                label = { Text("Quantité initiale") },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                modifier = Modifier.fillMaxWidth()
-            )
-            Spacer(modifier = Modifier.weight(1f))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = onCancel, modifier = Modifier.weight(1f)) { Text("Annuler") }
-                Button(onClick = onSave, modifier = Modifier.weight(1f), enabled = quantity.isNotEmpty() && photoUri != null) {
-                    Text("Enregistrer")
-                }
+            
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = quantity,
+                    onValueChange = onQuantityChange,
+                    label = { Text("Quantité") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.weight(1f)
+                )
+                OutlinedTextField(
+                    value = price,
+                    onValueChange = onPriceChange,
+                    label = { Text("Prix (€)") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    modifier = Modifier.weight(1f)
+                )
+            }
+            
+            Spacer(modifier = Modifier.height(30.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                OutlinedButton(
+                    onClick = onCancel,
+                    modifier = Modifier.weight(1f)) { Text("Annuler") }
+                Button(
+                    onClick = onSave,
+                    modifier = Modifier.weight(1f),
+                    enabled = quantity.isNotEmpty() && price.isNotEmpty() && photoUri != null) { Text("Enregistrer") }
             }
         }
     }
@@ -305,10 +397,8 @@ fun CameraScannerView(executor: ExecutorService, onBarcodeScanned: (String) -> U
                 }.addOnCompleteListener { imageProxy.close() }
             } else imageProxy.close()
         }
-        try {
-            cameraProvider.unbindAll()
-            cameraProvider.bindToLifecycle(lifecycleOwner, CameraSelector.DEFAULT_BACK_CAMERA, preview, imageAnalysis)
-        } catch (e: Exception) { Log.e("Camera", "Error", e) }
+        cameraProvider.unbindAll()
+        cameraProvider.bindToLifecycle(lifecycleOwner, CameraSelector.DEFAULT_BACK_CAMERA, preview, imageAnalysis)
     }
     AndroidView(factory = { previewView }, modifier = Modifier.fillMaxSize())
 }
@@ -323,10 +413,8 @@ fun CameraCaptureView(executor: ExecutorService, onPhotoCaptured: (Uri) -> Unit)
     LaunchedEffect(Unit) {
         val cameraProvider = ProcessCameraProvider.getInstance(context).get()
         val preview = Preview.Builder().build().also { it.setSurfaceProvider(previewView.surfaceProvider) }
-        try {
-            cameraProvider.unbindAll()
-            cameraProvider.bindToLifecycle(lifecycleOwner, CameraSelector.DEFAULT_BACK_CAMERA, preview, imageCapture)
-        } catch (e: Exception) { Log.e("Camera", "Error", e) }
+        cameraProvider.unbindAll()
+        cameraProvider.bindToLifecycle(lifecycleOwner, CameraSelector.DEFAULT_BACK_CAMERA, preview, imageCapture)
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -341,30 +429,36 @@ fun CameraCaptureView(executor: ExecutorService, onPhotoCaptured: (Uri) -> Unit)
                 })
             },
             modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 32.dp)
-        ) { Text("Prendre la Photo") }
+        ) { Text("Capturer") }
     }
 }
 
 private fun saveProductsLocally(context: Context, products: List<Product>) {
     try {
         val json = products.joinToString(separator = ",", prefix = "[", postfix = "]") {
-            "{\"barcode\":\"${it.barcode}\", \"quantity\":${it.quantity}, \"imagePath\":\"${it.imagePath}\"}"
+            "{\"barcode\":\"${it.barcode}\",\"quantity\":${it.quantity},\"price\":${it.price},\"imagePath\":\"${it.imagePath}\"}"
         }
         context.openFileOutput("products.json", Context.MODE_PRIVATE).use { it.write(json.toByteArray()) }
-    } catch (e: Exception) { Log.e("Storage", "Error", e) }
+    } catch (e: Exception) { Log.e("Storage", "Save error", e) }
 }
 
 private fun loadProductsLocally(context: Context): List<Product> {
-    val products = mutableListOf<Product>()
+    val productsList = mutableListOf<Product>()
     try {
         val file = File(context.filesDir, "products.json")
         if (file.exists()) {
             val content = file.readText()
-            val regex = Regex("\\{\"barcode\":\"(.*?)\", \"quantity\":(\\d+), \"imagePath\":\"(.*?)\"\\}")
+            val regex = Regex("""\{"barcode":"(.*?)","quantity":(\d+),"price":([\d.]+),"imagePath":"(.*?)"\}""")
             regex.findAll(content).forEach { match ->
-                products.add(Product(match.groupValues[1], match.groupValues[2].toInt(), if (match.groupValues[3] == "null") null else match.groupValues[3]))
+                val path = if (match.groupValues[4] == "null") null else match.groupValues[4]
+                productsList.add(Product(
+                    match.groupValues[1],
+                    match.groupValues[2].toInt(),
+                    match.groupValues[3].toDoubleOrNull() ?: 0.0,
+                    path
+                ))
             }
         }
-    } catch (e: Exception) { Log.e("Storage", "Error", e) }
-    return products
+    } catch (e: Exception) { Log.e("Storage", "Load error", e) }
+    return productsList
 }
