@@ -86,7 +86,7 @@ fun MainScreen(cameraExecutor: ExecutorService) {
     var photoUri by remember { mutableStateOf<Uri?>(null) }
     var isScanning by remember { mutableStateOf(true) }
 
-    // Chargement au démarrage
+    // Chargement au démarrage:
     LaunchedEffect(Unit) {
         products.clear()
         products.addAll(loadProductsLocally(context))
