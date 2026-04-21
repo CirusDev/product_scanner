@@ -61,7 +61,7 @@ class MainActivity : ComponentActivity() {
         cameraExecutor = Executors.newSingleThreadExecutor()
         enableEdgeToEdge()
         setContent {
-            ProductListTheme {
+            ProductListTheme(dynamicColor = false) {
                 MainScreen(cameraExecutor)
             }
         }
@@ -231,8 +231,8 @@ fun ProductItem(product: Product, onUpdateQuantity: (Int) -> Unit, onDelete: () 
                 IconButton(onClick = { if (product.quantity > 0) onUpdateQuantity(product.quantity - 1) }) {
                     Text(
                         "-",
+                        color = MaterialTheme.colorScheme.tertiary,
                         fontWeight = FontWeight.Bold,
-                        color = Color.White,
                         style = MaterialTheme.typography.titleLarge
                     )
                 }
@@ -280,7 +280,12 @@ fun ProductLookupView(product: Product, onUpdateQuantity: (Int) -> Unit, onBack:
                     val newQty = (product.quantity - 1).coerceAtLeast(0)
                     editValue = newQty.toString()
                     onUpdateQuantity(newQty)
-                }) { Text("-", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.headlineMedium) }
+                }) { Text(
+                    "-",
+                    color = MaterialTheme.colorScheme.tertiary,
+                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.headlineMedium
+                )}
 
                 OutlinedTextField(
                     value = editValue,
